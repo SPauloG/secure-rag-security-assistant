@@ -1,0 +1,18 @@
+# --- LLM and embeddings ---
+anthropic>=0.40.0
+voyageai>=0.3.0
+
+# --- Vector database ---
+pinecone>=5.0.0
+
+# --- Corpus parsing (PDF, HTML) ---
+pypdf>=4.0.0
+beautifulsoup4>=4.12.0
+requests>=2.32.0
+
+# --- Config and utilities ---
+python-dotenv>=1.0.0
+tiktoken>=0.7.0
+
+# --- Dev/testing (comes before the API, but already set up) ---
+pytest>=8.0.0
