@@ -1,0 +1,83 @@
+{
+  "_comment": "Seed of the fixed evaluation set. Every answerable question was checked against the corpus with scripts/search.py before being added, so a failure means the pipeline is wrong, not that the corpus is missing the material. `expected_sources` lists the file(s) that actually contain the answer; `grounds` records where.",
+  "questions": [
+    {
+      "question": "What is excessive agency in an LLM application and how do I limit it?",
+      "expects_answer": true,
+      "expected_sources": ["owasp-top10-llm-2025.pdf"],
+      "grounds": "LLM06:2025 Excessive Agency, pp. 26-27"
+    },
+    {
+      "question": "How do I prevent sensitive information disclosure from an LLM?",
+      "expects_answer": true,
+      "expected_sources": ["owasp-top10-llm-2025.pdf"],
+      "grounds": "LLM02:2025 Sensitive Information Disclosure, pp. 11-12"
+    },
+    {
+      "question": "What are vector and embedding weaknesses in RAG systems?",
+      "expects_answer": true,
+      "expected_sources": ["owasp-top10-llm-2025.pdf"],
+      "grounds": "LLM08:2025 Vector and Embedding Weaknesses, pp. 33-35"
+    },
+    {
+      "question": "What is system prompt leakage and why is it a risk?",
+      "expects_answer": true,
+      "expected_sources": ["owasp-top10-llm-2025.pdf"],
+      "grounds": "LLM07:2025 System Prompt Leakage, pp. 30-32"
+    },
+    {
+      "question": "What is broken access control and how do I prevent it?",
+      "expects_answer": true,
+      "expected_sources": ["owasp-top10-2021-a01.html"],
+      "grounds": "A01:2021, Description and How to Prevent"
+    },
+    {
+      "question": "What does OWASP recommend for security logging and monitoring?",
+      "expects_answer": true,
+      "expected_sources": ["owasp-top10-2021-a09.html"],
+      "grounds": "A09:2021, Overview and How to Prevent"
+    },
+    {
+      "question": "How do I prevent server-side request forgery?",
+      "expects_answer": true,
+      "expected_sources": ["owasp-top10-2021-a10.html"],
+      "grounds": "A10:2021, How to Prevent (network and application layer)"
+    },
+    {
+      "question": "How should passwords be stored to avoid cryptographic failures?",
+      "expects_answer": true,
+      "expected_sources": ["owasp-top10-2021-a02.html"],
+      "grounds": "A02:2021, How to Prevent — lowest scoring answerable question (0.53)"
+    },
+    {
+      "question": "What are the functions of the NIST Cybersecurity Framework 2.0?",
+      "expects_answer": true,
+      "expected_sources": ["nist-csf-2.0.pdf"],
+      "grounds": "CSF Core functions GOVERN/IDENTIFY/PROTECT/DETECT/RESPOND/RECOVER, pp. 9-10, 20"
+    },
+    {
+      "question": "What does the NIST CSF say about cybersecurity supply chain risk management?",
+      "expects_answer": true,
+      "expected_sources": ["nist-csf-2.0.pdf"],
+      "grounds": "GV.SC category, pp. 18, 22-23"
+    },
+    {
+      "question": "How do NIST CSF access control requirements relate to OWASP broken access control?",
+      "expects_answer": true,
+      "expected_sources": ["owasp-top10-2021-a01.html", "nist-csf-2.0.pdf"],
+      "grounds": "Deliberately hard: both documents cover access control, but retrieval returns A01 only. Included to keep the single-document bias visible rather than hidden."
+    },
+    {
+      "question": "How do I configure a Cisco ASA firewall?",
+      "expects_answer": false,
+      "expected_sources": [],
+      "grounds": "Hard negative: plausible security question, absent from the corpus. Scores 0.44 — above MIN_RETRIEVAL_SCORE, so only the system prompt can refuse it. Reviewed 2026-09-19: declined correctly ('the documents don't cover Cisco ASA configuration'), then offered the firewall posture the corpus does state, cited."
+    },
+    {
+      "question": "What is the maximum GDPR fine for a data breach?",
+      "expects_answer": false,
+      "expected_sources": [],
+      "grounds": "Hard negative: scores 0.46 on breach-related passages that never state a fine. Reviewed 2026-09-19: declined correctly and distinguished the GBP 20M fine in an A09 example scenario from a statutory maximum, which the corpus does not contain."
+    }
+  ]
+}
