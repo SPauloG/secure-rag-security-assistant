@@ -1,15 +1,11 @@
 """
-Runs the fixed evaluation set and checks two things per question:
+Runs the fixed evaluation set. Per question:
 
   1. answered vs refused matches what the question expects
-  2. when answered, the answer cites sources, and they come from the document that
-     actually contains the material
+  2. when answered, the answer cites the document that actually contains the material
+  3. when answered, an LLM judge scores faithfulness and relevancy (see scripts/judge.py)
 
-This is a harness, not a judge: it verifies that answers are grounded and attributed,
-which is the Cycle 1 definition of done. It does not score whether the prose is good —
-that needs a human or an LLM judge, and comes with the full 30-question set.
-
-Costs real API credits (~$0.03 per answered question).
+Costs real API credits.
 
 Run with:
     python -m scripts.evaluate
@@ -19,6 +15,7 @@ import json
 import sys
 from pathlib import Path
 
+from scripts.judge import Judge
 from src import config
 from src.retrieval.query import NO_ANSWER, format_citation, generate_answer, relevant_chunks
 
@@ -27,14 +24,9 @@ QUESTIONS_FILE = Path(__file__).resolve().parent.parent / "evaluation" / "questi
 
 def check(case: dict, chunks: list[dict], answer: str) -> tuple[str, str]:
     """
-    Returns (status, reason) where status is PASS, FAIL or REVIEW.
-
-    REVIEW exists because of a real limit: for a question the corpus cannot answer, the
-    thing to verify is that the reply did not fabricate one. The model does not emit the
-    canned NO_ANSWER for these — it writes its own, better refusal ("the documents don't
-    state a maximum GDPR fine..."), and no string match reliably tells an honest refusal
-    from a confident invention. That judgement needs a human or an LLM judge, so the
-    harness surfaces these instead of pretending to grade them.
+    Returns (status, reason): PASS, FAIL or REVIEW. REVIEW is a model-written reply to a
+    question the corpus cannot answer; no string match tells an honest refusal from an
+    invented answer, so a human reads it.
     """
     refused = not answer.strip() or answer.strip().startswith(NO_ANSWER[:40])
 
@@ -61,7 +53,8 @@ def main() -> None:
     show = "--show" in sys.argv
     cases = json.loads(QUESTIONS_FILE.read_text(encoding="utf-8"))["questions"]
 
-    results = []
+    judge = Judge()
+    results, scores = [], []
     for number, case in enumerate(cases, start=1):
         chunks = relevant_chunks(case["question"])
         answer = generate_answer(case["question"], chunks)
@@ -73,6 +66,10 @@ def main() -> None:
         print(f"            {reason}")
         if chunks:
             print(f"            retrieved: {', '.join(format_citation(c) for c in chunks[:3])}")
+        if case["expects_answer"] and status == "PASS":
+            score = judge.score(case["question"], answer, chunks)
+            scores.append(score)
+            print(f"            faithfulness {score['faithfulness']:.2f}  relevancy {score['answer_relevancy']:.2f}")
         # a REVIEW case is only useful if its answer is on screen
         if show or status == "REVIEW":
             print("\n" + "\n".join(f"      {line}" for line in answer.splitlines()) + "\n")
