@@ -1,15 +1,8 @@
 """
-Ingestion pipeline: takes the raw documents in data/corpus/,
-splits them into chunks, generates embeddings and loads them into Pinecone.
+Ingestion pipeline: reads data/corpus/, splits it into chunks, embeds them and
+upserts them into Pinecone.
 
 Run with: python -m src.ingestion.ingest
-
-DESIGN DECISIONS (document in the README when made):
-  - Chunking strategy: fixed size? by section/heading? how much overlap?
-    OWASP and NIST have a heading/section structure — worth using it instead
-    of cutting blindly by character count.
-  - What goes in each chunk's metadata (source, section title, URL) —
-    it is what allows "answering with a cited source" (a project requirement).
 """
 import re
 from collections import Counter
@@ -22,28 +15,23 @@ from src import config
 
 CORPUS_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "corpus"
 
-# Chunking limits, in characters (~4 chars per token in English), so a chunk stays
-# around 600 tokens: small enough that its embedding is about one topic, large
-# enough that the retrieved passage can answer on its own.
+# ~600 tokens per chunk.
 MAX_CHUNK_CHARS = 2500
 OVERLAP_CHARS = 200
 
-# Marker the HTML loader leaves on headings so chunking can split on them
-# without having to parse the HTML again.
+# Left on headings by the HTML loader so chunking can split on them.
 HEADING_PREFIX = "## "
 
-# Voyage accepts 1,000 texts and 120K tokens per request; these stay well inside both,
-# so one failed request costs little and the corpus can grow without hitting the ceiling.
+# Well inside Voyage's per-request limits (1,000 texts, 120K tokens).
 EMBED_BATCH_MAX_TEXTS = 128
 EMBED_BATCH_MAX_CHARS = 200_000
 
-# Running headers/footers: how many lines at each page edge to consider, and how much
-# of the document a line must appear on to count as boilerplate rather than content.
+# Running headers/footers: lines checked at each page edge, and the share of pages
+# a line must appear on to count as boilerplate.
 PDF_EDGE_LINES = 3
 PDF_BOILERPLATE_MIN_SHARE = 0.5
 
-# Human-readable PDF titles (the metadata embedded in the PDFs is inconsistent).
-# This is what shows up in the answer's citation. HTML files take the title from their own <h1>.
+# Citation titles; the PDFs' own metadata is inconsistent. HTML uses its <h1>.
 PDF_TITLES = {
     "owasp-top10-llm-2025.pdf": "OWASP Top 10 for LLM Applications 2025",
     "nist-csf-2.0.pdf": "NIST Cybersecurity Framework 2.0",
@@ -51,24 +39,15 @@ PDF_TITLES = {
 
 
 def _boilerplate_key(line: str) -> str:
-    """
-    Identifies a running header/footer regardless of its page number. Digits are dropped
-    rather than replaced, because the number is not always in the same place: this PDF
-    writes '5genai.owasp.org' on most pages but plain 'genai.owasp.org' on the last few.
-    A line made only of digits is a bare page number, keyed as "#".
-    """
+    """Header/footer key without page numbers; a bare page number becomes "#"."""
     return re.sub(r"\d+", "", line.strip()) or "#"
 
 
 def _repeated_edge_lines(pages: list[list[str]]) -> set[str]:
-    """
-    Finds running headers and footers: lines that recur at the top or bottom of most
-    pages. Only the page edges are considered, so repeated body text is never at risk.
-    """
+    """Lines that recur at the top or bottom of most pages (edges only, never body)."""
     seen = Counter()
     for lines in pages:
-        # Blank lines must not consume the edge window: some pages put the page number
-        # after one, which would otherwise push it out of view.
+        # blank lines must not push the page number out of the edge window
         content = [line for line in lines if line.strip()]
         edges = content[:PDF_EDGE_LINES] + content[-PDF_EDGE_LINES:]
         seen.update({_boilerplate_key(line) for line in edges})
@@ -116,10 +95,8 @@ def _load_html(path: Path) -> list[dict]:
     h1 = article.find("h1")
     title = h1.get_text(strip=True) if h1 else path.stem
     if h1:
-        h1.decompose()  # the page title lives in the metadata; leaving it in the body
-        # would produce a chunk holding nothing but the title
-    # Mark the headings instead of splitting here: reading and splitting stay separate,
-    # and chunk_documents() gets the structure without re-parsing the HTML.
+        h1.decompose()  # the title lives in the metadata; otherwise it becomes a chunk alone
+    # mark headings here, split in chunk_documents()
     for heading in article.find_all(["h2", "h3"]):
         text = heading.get_text(strip=True)
         heading.clear()
@@ -128,13 +105,7 @@ def _load_html(path: Path) -> list[dict]:
 
 
 def load_documents() -> list[dict]:
-    """
-    Reads the files in CORPUS_DIR and returns a list of dicts:
-    {"text", "source" (file name), "title", "page" (PDF page number; None for HTML)}.
-
-    It only reads and preserves the location; splitting by section is
-    chunk_documents()'s responsibility.
-    """
+    """Returns [{"text", "source", "title", "page" (None for HTML)}]; splitting is chunk_documents()'s job."""
     loaders = {".pdf": _load_pdf, ".html": _load_html}
     documents = []
     for path in sorted(CORPUS_DIR.iterdir()):
@@ -151,11 +122,8 @@ def _slug(value: str) -> str:
 
 def _split_by_heading(text: str) -> list[tuple[str | None, str]]:
     """
-    Splits HTML text on the headings marked by the loader, returning (section, text).
-
-    The heading stays inside its own chunk: "How to Prevent" is part of what the
-    chunk is about, so it belongs in the embedded text, not only in the metadata.
-    Text before the first heading keeps section=None (the intro under the <h1>).
+    Splits HTML text on the marked headings into (section, text). The heading stays in
+    the chunk text, since it is part of what the chunk is about.
     """
     sections: list[tuple[str | None, list[str]]] = [(None, [])]
     for line in text.split("\n"):
@@ -180,8 +148,7 @@ def _tail_lines(lines: list[str], overlap: int) -> list[str]:
 
 
 def _split_oversized(text: str, max_chars: int = MAX_CHUNK_CHARS, overlap: int = OVERLAP_CHARS) -> list[str]:
-    """Splits on line boundaries, repeating the previous lines so a sentence cut in
-    half by the boundary still appears whole in one of the two chunks."""
+    """Splits on line boundaries, with overlap so a cut sentence stays whole in one chunk."""
     if len(text) <= max_chars:
         return [text]
     parts: list[str] = []
@@ -207,13 +174,8 @@ def _split_oversized(text: str, max_chars: int = MAX_CHUNK_CHARS, overlap: int =
 
 def chunk_documents(documents: list[dict]) -> list[dict]:
     """
-    Splits documents into chunks, keeping the metadata that makes a citation possible.
-
-    Strategy (see "Why this chunking strategy" in the README): use structure where the
-    document actually provides it, size where it does not.
-      - HTML: split on the <h2>/<h3> headings — real markup, no guessing.
-      - PDF: keep the page, whose median size is already in the target range.
-    Either way, anything above MAX_CHUNK_CHARS is split further by size.
+    HTML splits on <h2>/<h3>, PDF keeps one chunk per page; anything above
+    MAX_CHUNK_CHARS is split further.
     """
     chunks: list[dict] = []
     counters: dict[tuple, int] = {}
@@ -236,13 +198,7 @@ def chunk_documents(documents: list[dict]) -> list[dict]:
 
 
 def _vector_metadata(chunk: dict) -> dict:
-    """
-    What travels with the vector, and therefore what a citation can be built from.
-
-    The chunk text is stored too: retrieval returns metadata, so keeping the passage
-    here means the answer can quote it without a second lookup. Pinecone rejects null
-    metadata values, so absent fields (page on HTML, section on PDF) are left out.
-    """
+    """Stored with the vector, text included. Pinecone rejects nulls, so they are dropped."""
     fields = {
         "text": chunk["text"],
         "source": chunk["source"],
@@ -254,11 +210,7 @@ def _vector_metadata(chunk: dict) -> dict:
 
 
 def _embedding_batches(chunks: list[dict]) -> list[list[dict]]:
-    """
-    Groups chunks into requests that stay inside Voyage's per-request limits
-    (1,000 texts and 120K tokens for voyage-4-large). Budgeted in characters since
-    that needs no tokenizer; the limit below is roughly half the token ceiling.
-    """
+    """Groups chunks into requests within Voyage's limits (budgeted in characters)."""
     batches: list[list[dict]] = []
     current: list[dict] = []
     chars = 0
@@ -294,12 +246,8 @@ def _pinecone_index():
 
 def embed_and_upsert(chunks: list[dict]) -> None:
     """
-    Embeds the chunks with Voyage AI and upserts them into Pinecone with their metadata.
-
-    input_type="document" matters: Voyage embeds a passage being indexed and a question
-    being asked differently, so retrieval must use "query" for the question side
-    (see src/retrieval/query.py). Chunk ids are deterministic, so re-running this
-    overwrites the same vectors instead of duplicating the index.
+    Embeds with input_type="document" (retrieval uses "query") and upserts. Ids are
+    deterministic, so re-running overwrites instead of duplicating.
     """
     import voyageai
 

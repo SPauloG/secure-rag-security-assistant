@@ -1,9 +1,6 @@
 """
 Measures the corpus and the resulting chunks.
 
-Every number quoted in the README's "Why this chunking strategy" section comes from
-this script, so the reasoning behind the strategy can be re-checked instead of trusted.
-
 Run with: python -m scripts.analyze_corpus
 """
 import re

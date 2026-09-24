@@ -1,8 +1,8 @@
 """
 Retrieval only — no LLM call, no Anthropic credits spent.
 
-Shows which passages the index returns for a question and how strongly each matched,
-which is the fastest way to tell a retrieval problem from a generation problem.
+Shows what the index returns for a question, to tell a retrieval problem from a
+generation problem.
 
 Run with:
     python -m scripts.search "how do I prevent prompt injection?"

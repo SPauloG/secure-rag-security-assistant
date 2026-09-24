@@ -1,15 +1,8 @@
 """
-Retrieval + generation: takes a question, fetches the most relevant chunks
-from Pinecone, builds the context and asks Claude for an answer that cites its sources.
+Retrieval + generation: fetches the most relevant chunks and asks Claude for an
+answer that cites them.
 
 Run with: python -m src.retrieval.query "your question here"
-
-DESIGN DECISIONS (document in the README when made):
-  - How many chunks to retrieve (top_k) and how to build the context prompt.
-  - How to format the source citation in the answer (required by the
-    project's definition of done).
-  - What to do when retrieval finds nothing relevant (not inventing an
-    answer is what separates a well-built RAG from hallucination).
 """
 import sys
 
@@ -18,13 +11,9 @@ from src import config
 
 def retrieve(question: str, top_k: int = 5) -> list[dict]:
     """
-    Embeds the question and returns the top_k most similar chunks, best first.
+    Returns the top_k most similar chunks, best first, each with its cosine `score`.
 
-    input_type="query" is required here and is not the same as the "document" used
-    during ingestion: Voyage embeds a question and a passage differently, and mixing
-    them up degrades results silently — nothing errors, the matches are just worse.
-
-    Each result carries its metadata plus the similarity `score` (cosine, 0-1).
+    input_type="query" (not "document"): mixing them up silently degrades matches.
     """
     import voyageai
 
@@ -55,12 +44,7 @@ def retrieve(question: str, top_k: int = 5) -> list[dict]:
 
 
 def format_citation(chunk: dict) -> str:
-    """
-    How a retrieved passage is identified to the reader.
-
-    HTML chunks cite the section, PDF chunks the page — the finest locator each format
-    reliably provides. Both are verifiable: the reader can open the document and check.
-    """
+    """HTML chunks cite the section, PDF chunks the page."""
     if chunk.get("section"):
         return f"{chunk['title']} › {chunk['section']}"
     if chunk.get("page"):
@@ -87,12 +71,8 @@ documents state over a general summary of the topic."""
 
 def _documents_for(chunks: list[dict]) -> list[dict]:
     """
-    Each retrieved passage becomes a document block with citations enabled.
-
-    This is what makes a fabricated citation structurally impossible: Claude does not
-    write the references, the API returns which span of which document supported each
-    sentence. `title` is already the human-readable citation, and the block's position
-    in this list is the `document_index` the response cites back.
+    One document block per chunk, with API citations enabled, so Claude cannot
+    fabricate a reference. A block's position is the `document_index` cited back.
     """
     return [
         {
@@ -112,12 +92,7 @@ TRUNCATED_NOTICE = (
 
 
 def _render(blocks, chunks: list[dict], truncated: bool = False) -> str:
-    """
-    Turns the response into text with [n] markers and a sources list.
-
-    The numbering is derived from the API's citation data, not from anything the model
-    wrote, so a marker can only point at a passage that was actually retrieved.
-    """
+    """Text with [n] markers built from the API's citation data, plus a sources list."""
     answer: list[str] = []
     order: list[int] = []  # document_index of each source, in order of first citation
 
@@ -138,8 +113,7 @@ def _render(blocks, chunks: list[dict], truncated: bool = False) -> str:
 
     text = "".join(answer).strip()
     if truncated:
-        # Never let a half-finished answer look complete: it stops mid-sentence, and the
-        # part that was cut may be the caveat that changed the meaning.
+        # a cut-off answer must not look complete
         text = f"{text}\n\n{TRUNCATED_NOTICE}"
     if not order:
         return text
@@ -152,14 +126,7 @@ def _render(blocks, chunks: list[dict], truncated: bool = False) -> str:
 
 
 def generate_answer(question: str, chunks: list[dict]) -> str:
-    """
-    Answers the question from the retrieved passages, citing them.
-
-    Two independent guards against answering from thin air, because they catch
-    different failures: the caller drops low-scoring matches ("the corpus has nothing
-    on this"), and the system prompt tells Claude to refuse when the passages it did
-    get do not answer the question ("close, but not an answer").
-    """
+    """Answers from the retrieved passages, citing them."""
     import anthropic
 
     if not chunks:
@@ -169,7 +136,6 @@ def generate_answer(question: str, chunks: list[dict]) -> str:
     response = client.messages.create(
         model=config.GENERATION_MODEL,
         max_tokens=config.GENERATION_MAX_TOKENS,
-        output_config={"effort": config.GENERATION_EFFORT},
         system=SYSTEM_PROMPT,
         messages=[{
             "role": "user",
