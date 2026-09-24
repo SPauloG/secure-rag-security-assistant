@@ -4,26 +4,17 @@ A security assistant built on RAG + guardrails, over an OWASP and NIST corpus.
 It answers questions about security policies, controls and best practices,
 citing the source document and passage.
 
-## Current status
-
-- [ ] Corpus ingestion (chunking + embeddings + Pinecone)
-- [ ] Retrieval + generation with source citation
-- [ ] Evaluation on 30 fixed questions
-- [ ] Security layer (PII, prompt injection)
-- [ ] API (FastAPI) + tests + CI — after the local RAG works
-- [ ] Deployment on AWS App Runner — after the API is ready
-
 ## Stack
 
 - Python 3.12
-- Claude API (Anthropic) for generation
+- Claude API (Anthropic) for generation — Claude Haiku 4.5 during development
 - Voyage AI for embeddings (Anthropic's recommended partner — Claude has no
   embeddings endpoint of its own)
 - Pinecone (free tier) as the vector database
 
 ## Setup
 
-1. Create and activate the venv, then install the dependencies (Git Bash on Windows):
+1. Create and activate the venv, then install the dependencies:
    ```
    python -m venv .venv
    source .venv/Scripts/activate   # Linux/macOS: source .venv/bin/activate
@@ -33,13 +24,39 @@ citing the source document and passage.
    - `ANTHROPIC_API_KEY` — console.anthropic.com
    - `VOYAGE_API_KEY` — dash.voyageai.com (free tier available)
    - `PINECONE_API_KEY` — app.pinecone.io (free tier)
+   - `GEMINI_API_KEY` — aistudio.google.com (free tier; only for the evaluation judge)
 3. Put the source documents in `data/corpus/` (see the README inside)
 4. Run the ingestion: `python -m src.ingestion.ingest`
 5. Ask a question: `python -m src.retrieval.query "your question"`
 
-## Architecture decisions
+## Architecture
 
-(filled in as the project progresses)
+```mermaid
+flowchart LR
+    subgraph Ingestion["Ingestion (offline)"]
+        C["data/corpus/<br/>PDF + HTML"] --> L["Load<br/>PDF: per page<br/>HTML: &lt;article&gt;"]
+        L --> K["Chunk<br/>HTML: by h2/h3<br/>PDF: by page"]
+        K --> E1["Embed<br/>Voyage AI"]
+    end
+
+    E1 --> P[("Pinecone<br/>vectors + metadata")]
+
+    subgraph Query["Query (online)"]
+        Q["Question"] --> E2["Embed<br/>Voyage AI"]
+        E2 --> R["Retrieve top 5"]
+        R --> G1{"Score ≥ 0.35?"}
+        G1 -- no --> N["Fixed reply:<br/>nothing in the corpus"]
+        G1 -- yes --> LLM["Claude<br/>passages as documents,<br/>citations enabled"]
+        LLM --> A["Answer + sources"]
+    end
+
+    P --> R
+
+    subgraph Eval["Evaluation"]
+        A --> H["Harness<br/>refusal + attribution"]
+        A --> J["LLM judge (RAGAS + Gemini)<br/>faithfulness, relevancy"]
+    end
+```
 
 ### Corpus
 Three sources, chosen to cover two document styles at a manageable size
@@ -52,16 +69,5 @@ Three sources, chosen to cover two document styles at a manageable size
 - **NIST CSF 2.0** (~30 pages) — Function › Category › Subcategory hierarchy;
   the ID (e.g. `PR.AA-01`) becomes an exact citation.
 
-Discarded for now: NIST SP 800-53 (~480 pages: embedding cost and a volume that
-hides chunking mistakes while validating the baseline) and NIST AI RMF (more
-conceptual, less "control" text). Known gap: there is no internal policy in the
-corpus, although the case mentions it.
 
-### Why App Runner and not Lambda/Fargate
-TODO
 
-### Why this chunking strategy
-TODO
-
-### Why this embedding model
-TODO

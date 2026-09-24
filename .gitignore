@@ -8,6 +8,6 @@ data/corpus/*
 .pytest_cache/
 *.egg-info/
 .DS_Store
-
+.vscode
 # Local working context for the AI assistant, not part of the project
 CLAUDE.md
